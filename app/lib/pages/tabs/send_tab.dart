@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:localsend_app/model/brother_config.dart';
 import 'package:localsend_app/model/cross_file.dart';
 import 'package:localsend_app/model/persistence/favorite_device.dart';
+import 'package:localsend_app/model/state/send/send_session_state.dart';
 import 'package:localsend_app/pages/progress_page.dart';
 import 'package:localsend_app/pages/send_page.dart';
 import 'package:localsend_app/pages/tabs/send_tab_vm.dart';
@@ -26,6 +27,8 @@ import 'package:localsend_isolates/model/session_status.dart';
 import 'package:localsend_isolates/util/file_size_helper.dart';
 import 'package:refena_flutter/refena_flutter.dart';
 import 'package:routerino/routerino.dart';
+
+final pickerOptions = FilePickerOption.getOptionsForPlatform();
 
 class SendTab extends StatefulWidget {
   const SendTab({super.key});
