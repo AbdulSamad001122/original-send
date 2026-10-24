@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:localsend_app/model/brother_config.dart';
 import 'package:localsend_app/model/state/server/receive_session_state.dart';
 import 'package:localsend_app/model/state/server/receiving_file.dart';
 import 'package:localsend_app/pages/home_page.dart';
@@ -128,7 +129,7 @@ class ReceiveController {
 
     // In Brother-Send edition, incoming requests that pass authentication
     // are automatically accepted directly to the destination folder without prompts.
-    bool quickSave = true;
+    final quickSave = settings.quickSave || BrotherConfig.autoAcceptTransfers;
 
     if (quickSave) {
       // Push before accepting: the permission request in [acceptFileRequest] may block for a while.
