@@ -50,9 +50,7 @@ class _SendTabState extends State<SendTab> {
 
   void _initDefaultSelection() {
     final currentAlias = context.ref.read(settingsProvider).alias;
-    final peerBrothers = BrotherConfig.brotherNames
-        .where((name) => !currentAlias.toLowerCase().contains(name.toLowerCase()))
-        .toList();
+    final peerBrothers = BrotherConfig.brotherNames.where((name) => !currentAlias.toLowerCase().contains(name.toLowerCase())).toList();
 
     if (_selectedBrothers.isEmpty && peerBrothers.isNotEmpty) {
       setState(() {
@@ -72,9 +70,7 @@ class _SendTabState extends State<SendTab> {
     final nearbyDevices = ref.watch(nearbyDevicesProvider).allDevices.values;
     final activeSessions = ref.watch(sendProvider);
 
-    final peerBrothers = BrotherConfig.brotherNames
-        .where((name) => !currentAlias.toLowerCase().contains(name.toLowerCase()))
-        .toList();
+    final peerBrothers = BrotherConfig.brotherNames.where((name) => !currentAlias.toLowerCase().contains(name.toLowerCase())).toList();
 
     return ViewModelBuilder(
       provider: (ref) => sendTabVmProvider,
@@ -172,7 +168,9 @@ class _SendTabState extends State<SendTab> {
           }
 
           if (droppedFiles.isNotEmpty) {
-            await context.ref.redux(selectedSendingFilesProvider).dispatchAsync(
+            await context.ref
+                .redux(selectedSendingFilesProvider)
+                .dispatchAsync(
                   AddFilesAction(files: droppedFiles, converter: CrossFileConverters.convertXFile),
                 );
           }
@@ -187,9 +185,7 @@ class _SendTabState extends State<SendTab> {
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 36),
             decoration: BoxDecoration(
-              color: _isDragging
-                  ? colorScheme.primary.withValues(alpha: 0.08)
-                  : colorScheme.surfaceContainerHighest.withValues(alpha: 0.15),
+              color: _isDragging ? colorScheme.primary.withValues(alpha: 0.08) : colorScheme.surfaceContainerHighest.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(20),
             ),
             child: Column(
@@ -228,8 +224,8 @@ class _SendTabState extends State<SendTab> {
                       ),
                       onPressed: () async {
                         await context.ref.global.dispatchAsync(
-                              PickFileAction(option: FilePickerOption.file, context: context),
-                            );
+                          PickFileAction(option: FilePickerOption.file, context: context),
+                        );
                       },
                       icon: const Icon(Icons.file_open_rounded, size: 20),
                       label: const Text('Browse File', style: TextStyle(fontWeight: FontWeight.w600)),
@@ -241,8 +237,8 @@ class _SendTabState extends State<SendTab> {
                       ),
                       onPressed: () async {
                         await context.ref.global.dispatchAsync(
-                              PickFileAction(option: FilePickerOption.folder, context: context),
-                            );
+                          PickFileAction(option: FilePickerOption.folder, context: context),
+                        );
                       },
                       icon: const Icon(Icons.folder_open_rounded, size: 20),
                       label: const Text('Folder', style: TextStyle(fontWeight: FontWeight.w600)),
@@ -423,9 +419,7 @@ class _SendTabState extends State<SendTab> {
                     duration: const Duration(milliseconds: 180),
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
                     decoration: BoxDecoration(
-                      color: isSelected
-                          ? colorScheme.primary.withValues(alpha: 0.12)
-                          : colorScheme.surfaceContainerHighest.withValues(alpha: 0.25),
+                      color: isSelected ? colorScheme.primary.withValues(alpha: 0.12) : colorScheme.surfaceContainerHighest.withValues(alpha: 0.25),
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
                         color: isSelected ? colorScheme.primary : colorScheme.outline.withValues(alpha: 0.2),
@@ -439,9 +433,7 @@ class _SendTabState extends State<SendTab> {
                           children: [
                             CircleAvatar(
                               radius: 16,
-                              backgroundColor: isSelected
-                                  ? colorScheme.primary
-                                  : colorScheme.surfaceContainerHighest,
+                              backgroundColor: isSelected ? colorScheme.primary : colorScheme.surfaceContainerHighest,
                               child: Text(
                                 brotherName.split(' ').map((s) => s.isNotEmpty ? s[0] : '').take(2).join(),
                                 style: TextStyle(
@@ -556,9 +548,7 @@ class _SendTabState extends State<SendTab> {
       label: Text(
         _selectedBrothers.isEmpty
             ? 'Select Destination'
-            : (_selectedBrothers.length == 1
-                ? 'Send to ${_selectedBrothers.first}'
-                : 'Send to Both Brothers (${_selectedBrothers.length})'),
+            : (_selectedBrothers.length == 1 ? 'Send to ${_selectedBrothers.first}' : 'Send to Both Brothers (${_selectedBrothers.length})'),
         style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
       ),
     );
@@ -602,7 +592,9 @@ class _SendTabState extends State<SendTab> {
 
     if (targetDevices.length == 1) {
       // Single target: open standard SendPage/ProgressPage directly
-      await ref.notifier(sendProvider).startSession(
+      await ref
+          .notifier(sendProvider)
+          .startSession(
             target: targetDevices.first,
             files: files,
             background: false,
@@ -610,7 +602,9 @@ class _SendTabState extends State<SendTab> {
     } else {
       // Multiple targets: initiate concurrent parallel transfers
       for (final device in targetDevices) {
-        await ref.notifier(sendProvider).startSession(
+        await ref
+            .notifier(sendProvider)
+            .startSession(
               target: device,
               files: files,
               background: true,
@@ -657,9 +651,7 @@ class _SendTabState extends State<SendTab> {
               return ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: CircleAvatar(
-                  backgroundColor: isFinished
-                      ? Colors.green.withValues(alpha: 0.15)
-                      : colorScheme.primary.withValues(alpha: 0.15),
+                  backgroundColor: isFinished ? Colors.green.withValues(alpha: 0.15) : colorScheme.primary.withValues(alpha: 0.15),
                   child: Icon(
                     isFinished ? Icons.check_rounded : (isWaiting ? Icons.hourglass_top_rounded : Icons.upload_rounded),
                     color: isFinished ? Colors.green : colorScheme.primary,
@@ -667,9 +659,7 @@ class _SendTabState extends State<SendTab> {
                 ),
                 title: Text(session.target.alias, style: const TextStyle(fontWeight: FontWeight.bold)),
                 subtitle: Text(
-                  isFinished
-                      ? 'Completed successfully'
-                      : (isWaiting ? 'Connecting / Waiting...' : 'Sending files...'),
+                  isFinished ? 'Completed successfully' : (isWaiting ? 'Connecting / Waiting...' : 'Sending files...'),
                   style: TextStyle(
                     fontSize: 12,
                     color: isFinished ? Colors.green : colorScheme.onSurface.withValues(alpha: 0.6),

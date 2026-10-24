@@ -5,8 +5,8 @@ import 'package:localsend_app/provider/http_provider.dart';
 import 'package:localsend_app/provider/network/nearby_devices_provider.dart';
 import 'package:localsend_app/provider/settings_provider.dart';
 import 'package:localsend_isolates/model/device.dart';
-import 'package:localsend_isolates/model/dto/multicast_dto.dart';
-import 'package:localsend_isolates/rust/api/model.dart' as rust_model;
+import 'package:localsend_isolates/rust/api/model.dart';
+import 'package:localsend_isolates/util/rust.dart';
 import 'package:logging/logging.dart';
 import 'package:refena_flutter/refena_flutter.dart';
 
@@ -20,7 +20,7 @@ Future<Device?> resolveBrotherDevice(Ref ref, FavoriteDevice favorite) async {
     (d) =>
         d.alias.toLowerCase().contains(favorite.alias.toLowerCase()) ||
         favorite.alias.toLowerCase().contains(d.alias.toLowerCase()) ||
-        d.ip.toLowerCase() == favorite.ip.toLowerCase(),
+        (d.ip != null && d.ip!.toLowerCase() == favorite.ip.toLowerCase()),
   );
 
   if (discovered != null) {
@@ -31,12 +31,15 @@ Future<Device?> resolveBrotherDevice(Ref ref, FavoriteDevice favorite) async {
   try {
     final https = ref.read(settingsProvider).https;
     final payload = ref.read(deviceFullInfoProvider).toRegisterDto();
-    final response = await ref.read(httpProvider).discovery.register(
-      protocol: https ? rust_model.ProtocolType.https : rust_model.ProtocolType.http,
-      ip: favorite.ip,
-      port: favorite.port,
-      payload: payload,
-    );
+    final response = await ref
+        .read(httpProvider)
+        .discovery
+        .register(
+          protocol: https ? ProtocolType.https : ProtocolType.http,
+          ip: favorite.ip,
+          port: favorite.port,
+          payload: payload,
+        );
     return response.body.toDevice(favorite.ip, favorite.port, https);
   } catch (e) {
     _logger.info('Could not directly reach ${favorite.alias} at ${favorite.ip}: $e');

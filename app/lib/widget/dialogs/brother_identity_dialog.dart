@@ -68,8 +68,8 @@ class _BrotherIdentityDialogState extends State<BrotherIdentityDialog> {
           'Select your identity to connect seamlessly with your brothers',
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
-              ),
+            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+          ),
         ),
         const SizedBox(height: 20),
         ...BrotherConfig.brotherNames.map((name) {
@@ -145,8 +145,8 @@ class _BrotherIdentityDialogState extends State<BrotherIdentityDialog> {
           'Choose the role for $_selectedBrother\'s device',
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
-              ),
+            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+          ),
         ),
         const SizedBox(height: 20),
         _buildDeviceCard(
