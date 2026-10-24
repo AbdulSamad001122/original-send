@@ -9,14 +9,16 @@ import 'package:localsend_app/pages/home_page_controller.dart';
 import 'package:localsend_app/pages/tabs/receive_tab.dart';
 import 'package:localsend_app/pages/tabs/send_tab.dart';
 import 'package:localsend_app/pages/tabs/settings_tab.dart';
+import 'package:localsend_app/provider/persistence_provider.dart';
 import 'package:localsend_app/provider/selection/selected_sending_files_provider.dart';
 import 'package:localsend_app/util/native/cross_file_converters.dart';
+import 'package:localsend_app/widget/dialogs/brother_identity_dialog.dart';
 import 'package:localsend_app/widget/responsive_builder.dart';
 import 'package:refena_flutter/refena_flutter.dart';
 
 enum HomeTab {
-  receive(Icons.wifi),
   send(Icons.send),
+  receive(Icons.wifi),
   settings(Icons.settings)
   ;
 
@@ -26,10 +28,10 @@ enum HomeTab {
 
   String get label {
     switch (this) {
-      case HomeTab.receive:
-        return t.receiveTab.title;
       case HomeTab.send:
         return t.sendTab.title;
+      case HomeTab.receive:
+        return t.receiveTab.title;
       case HomeTab.settings:
         return t.settingsTab.title;
     }
@@ -63,6 +65,18 @@ class _HomePageState extends State<HomePage> with Refena {
     ensureRef((ref) async {
       ref.redux(homePageControllerProvider).dispatch(ChangeTabAction(widget.initialTab));
       await postInit(context, ref, widget.appStart);
+
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!context.mounted) return;
+        final persistence = ref.read(persistenceProvider);
+        if (!persistence.isBrotherIdentitySelected()) {
+          await showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (_) => const BrotherIdentityDialog(isInitialSetup: true),
+          );
+        }
+      });
     });
   }
 
@@ -119,7 +133,7 @@ class _HomePageState extends State<HomePage> with Refena {
                             children: [
                               SizedBox(height: 20),
                               Text(
-                                'LocalSend',
+                                'BrotherSend',
                                 style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
                                 textAlign: TextAlign.center,
                               ),
@@ -143,8 +157,8 @@ class _HomePageState extends State<HomePage> with Refena {
                           controller: vm.controller,
                           physics: const NeverScrollableScrollPhysics(),
                           children: const [
-                            ReceiveTab(),
                             SendTab(),
+                            ReceiveTab(),
                             SettingsTab(),
                           ],
                         ),

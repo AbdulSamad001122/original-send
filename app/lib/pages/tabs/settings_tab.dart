@@ -19,6 +19,7 @@ import 'package:localsend_app/util/native/macos_channel.dart';
 import 'package:localsend_app/util/native/pick_directory_path.dart';
 import 'package:localsend_app/util/native/platform_check.dart';
 import 'package:localsend_app/widget/custom_dropdown_button.dart';
+import 'package:localsend_app/widget/dialogs/brother_identity_dialog.dart';
 import 'package:localsend_app/widget/dialogs/encryption_disabled_notice.dart';
 import 'package:localsend_app/widget/dialogs/pin_dialog.dart';
 import 'package:localsend_app/widget/dialogs/quick_save_from_favorites_notice.dart';
@@ -362,6 +363,17 @@ class SettingsTab extends StatelessWidget {
                       ],
                     ),
                   ),
+                ),
+                _ButtonEntry(
+                  label: 'Brother Identity',
+                  buttonLabel: '${vm.settings.alias} (${vm.deviceInfo.deviceType.humanName})',
+                  onTap: () async {
+                    await showDialog(
+                      context: context,
+                      builder: (_) => const BrotherIdentityDialog(isInitialSetup: false),
+                    );
+                    vm.aliasController.text = ref.read(settingsProvider).alias;
+                  },
                 ),
                 _SettingsEntry(
                   label: t.settingsTab.network.alias,

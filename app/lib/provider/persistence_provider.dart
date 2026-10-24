@@ -96,6 +96,7 @@ const _createChecksums = 'ls_create_checksums';
 const _verifyChecksums = 'ls_verify_checksums';
 const _advancedSettingsKey = 'ls_advanced_settings';
 const _whatsNewKey = 'ls_whats_new';
+const _brotherIdentitySelected = 'bs_brother_identity_selected';
 
 final persistenceProvider = Provider<PersistenceService>((ref) {
   throw Exception('persistenceProvider not initialized');
@@ -598,6 +599,14 @@ class PersistenceService {
 
   Future<void> setWhatsNew(String version) async {
     await _prefs.setString(_whatsNewKey, version);
+  }
+
+  bool isBrotherIdentitySelected() {
+    return _prefs.getBool(_brotherIdentitySelected) ?? false;
+  }
+
+  Future<void> setBrotherIdentitySelected(bool selected) async {
+    await _prefs.setBool(_brotherIdentitySelected, selected);
   }
 
   Future<void> clear() async {

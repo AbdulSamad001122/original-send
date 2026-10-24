@@ -9,6 +9,13 @@ class BrotherConfig {
   /// Whether to auto-accept transfers directly to Downloads without manual confirmation.
   static bool get autoAcceptTransfers => true;
 
+  /// The list of the 3 brother names.
+  static const List<String> brotherNames = [
+    'Abdul Qadir',
+    'Abdullah',
+    'Abdul Samad',
+  ];
+
   /// Predefined brother device profiles with their actual names and mDNS hostnames.
   static List<FavoriteDevice> get defaultFavoriteBrothers => [
     const FavoriteDevice(

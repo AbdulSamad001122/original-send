@@ -43,9 +43,10 @@ class AddMessageAction extends ReduxAction<SelectedSendingFilesNotifier, List<Cr
 
   @override
   List<CrossFile> reduce() {
-    final List<int> bytes = utf8.encode(message);
+    final snippet = message.trim().replaceAll('\n', ' ');
+    final displayName = snippet.length > 25 ? '${snippet.substring(0, 25)}...' : (snippet.isEmpty ? 'Live Text' : snippet);
     final file = CrossFile(
-      name: '${_uuid.v4()}.txt',
+      name: displayName,
       fileType: FileType.text,
       size: bytes.length,
       thumbnail: null,

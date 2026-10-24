@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:localsend_app/model/brother_config.dart';
 import 'package:localsend_app/model/state/server/receive_session_state.dart';
 import 'package:localsend_app/model/state/server/receiving_file.dart';
@@ -127,9 +128,10 @@ class ReceiveController {
           statuses: {for (final file in files.values) file.id: FileStatus.queue},
         );
 
-    // In Brother-Send edition, incoming requests that pass authentication
+    // In Brother-Send edition, incoming file requests that pass authentication
     // are automatically accepted directly to the destination folder without prompts.
-    final quickSave = settings.quickSave || BrotherConfig.autoAcceptTransfers;
+    // Live text messages are preserved for interactive viewing/copying instead of saving as files.
+    final quickSave = (settings.quickSave || BrotherConfig.autoAcceptTransfers) && server.getState().session?.message == null;
 
     if (quickSave) {
       // Push before accepting: the permission request in [acceptFileRequest] may block for a while.
@@ -155,6 +157,7 @@ class ReceiveController {
 
     final message = server.getState().session?.message;
     if (message != null) {
+      unawaited(Clipboard.setData(ClipboardData(text: message)));
       // Message already received
       await server.ref
           .redux(receiveHistoryProvider)

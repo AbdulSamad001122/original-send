@@ -1,609 +1,755 @@
+import 'dart:io';
+
 import 'package:collection/collection.dart';
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
-import 'package:localsend_app/config/theme.dart';
-import 'package:localsend_app/gen/strings.g.dart';
-import 'package:localsend_app/model/send_mode.dart';
-import 'package:localsend_app/pages/device_details_page.dart';
-import 'package:localsend_app/pages/selected_files_page.dart';
+import 'package:localsend_app/model/brother_config.dart';
+import 'package:localsend_app/model/cross_file.dart';
+import 'package:localsend_app/model/persistence/favorite_device.dart';
+import 'package:localsend_app/pages/progress_page.dart';
+import 'package:localsend_app/pages/send_page.dart';
 import 'package:localsend_app/pages/tabs/send_tab_vm.dart';
-import 'package:localsend_app/pages/troubleshoot_page.dart';
-import 'package:localsend_app/provider/animation_provider.dart';
-import 'package:localsend_app/provider/file_transfer_provider.dart';
 import 'package:localsend_app/provider/network/nearby_devices_provider.dart';
-import 'package:localsend_app/provider/network/scan_facade.dart';
 import 'package:localsend_app/provider/network/send_provider.dart';
 import 'package:localsend_app/provider/selection/selected_sending_files_provider.dart';
 import 'package:localsend_app/provider/settings_provider.dart';
-import 'package:localsend_app/util/favorites.dart';
+import 'package:localsend_app/util/brother_send_helper.dart';
+import 'package:localsend_app/util/native/cross_file_converters.dart';
 import 'package:localsend_app/util/native/file_picker.dart';
-import 'package:localsend_app/util/native/platform_check.dart';
-import 'package:localsend_app/widget/big_button.dart';
-import 'package:localsend_app/widget/custom_icon_button.dart';
-import 'package:localsend_app/widget/dialogs/add_file_dialog.dart';
-import 'package:localsend_app/widget/dialogs/send_mode_help_dialog.dart';
+import 'package:localsend_app/widget/dialogs/brother_identity_dialog.dart';
+import 'package:localsend_app/widget/dialogs/live_text_dialog.dart';
 import 'package:localsend_app/widget/file_thumbnail.dart';
-import 'package:localsend_app/widget/list_tile/device_list_tile.dart';
-import 'package:localsend_app/widget/list_tile/device_placeholder_list_tile.dart';
-import 'package:localsend_app/widget/opacity_slideshow.dart';
-import 'package:localsend_app/widget/responsive_builder.dart';
 import 'package:localsend_app/widget/responsive_list_view.dart';
-import 'package:localsend_app/widget/responsive_wrap_view.dart';
-import 'package:localsend_app/widget/rotating_widget.dart';
 import 'package:localsend_isolates/model/device.dart';
+import 'package:localsend_isolates/model/file_type.dart';
 import 'package:localsend_isolates/model/session_status.dart';
 import 'package:localsend_isolates/util/file_size_helper.dart';
 import 'package:refena_flutter/refena_flutter.dart';
 import 'package:routerino/routerino.dart';
 
-const _horizontalPadding = 15.0;
-final pickerOptions = FilePickerOption.getOptionsForPlatform();
+class SendTab extends StatefulWidget {
+  const SendTab({super.key});
 
-class SendTab extends StatelessWidget {
-  const SendTab();
+  @override
+  State<SendTab> createState() => _SendTabState();
+}
+
+class _SendTabState extends State<SendTab> {
+  final Set<String> _selectedBrothers = {};
+  bool _isDragging = false;
+  bool _isSending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Default select all peer brothers once initialized
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initDefaultSelection();
+    });
+  }
+
+  void _initDefaultSelection() {
+    final currentAlias = context.ref.read(settingsProvider).alias;
+    final peerBrothers = BrotherConfig.brotherNames
+        .where((name) => !currentAlias.toLowerCase().contains(name.toLowerCase()))
+        .toList();
+
+    if (_selectedBrothers.isEmpty && peerBrothers.isNotEmpty) {
+      setState(() {
+        _selectedBrothers.addAll(peerBrothers);
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final ref = context.ref;
+
+    final selectedFiles = ref.watch(selectedSendingFilesProvider);
+    final currentAlias = ref.watch(settingsProvider.select((s) => s.alias));
+    final nearbyDevices = ref.watch(nearbyDevicesProvider).allDevices.values;
+    final activeSessions = ref.watch(sendProvider);
+
+    final peerBrothers = BrotherConfig.brotherNames
+        .where((name) => !currentAlias.toLowerCase().contains(name.toLowerCase()))
+        .toList();
+
     return ViewModelBuilder(
       provider: (ref) => sendTabVmProvider,
-      init: (context) async => context.global.dispatchAsync(SendTabInitAction(context)), // ignore: discarded_futures
+      init: (context) async => context.global.dispatchAsync(SendTabInitAction(context)),
       builder: (context, vm) {
-        final sizingInformation = SizingInformation(MediaQuery.sizeOf(context).width);
-        final buttonWidth = sizingInformation.isDesktop ? BigButton.desktopWidth : BigButton.mobileWidth;
-        final ref = context.ref;
         return ResponsiveListView(
-          padding: EdgeInsets.zero,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
           children: [
-            const SizedBox(height: 20),
-            if (vm.selectedFiles.isEmpty) ...[
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: _horizontalPadding),
-                child: Text(
-                  t.sendTab.selection.title,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ),
-              ResponsiveWrapView(
-                outerHorizontalPadding: 15,
-                outerVerticalPadding: 10,
-                childPadding: 10,
-                minChildWidth: buttonWidth,
-                children: pickerOptions.map((option) {
-                  return BigButton(
-                    icon: option.icon,
-                    label: option.label,
-                    filled: false,
-                    onTap: () async => ref.global.dispatchAsync(
-                      PickFileAction(
-                        option: option,
-                        context: context,
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
-            ] else ...[
-              Card(
-                margin: const EdgeInsets.only(bottom: 10, left: _horizontalPadding, right: _horizontalPadding),
-                child: Padding(
-                  padding: const EdgeInsetsDirectional.only(start: 15, top: 5, bottom: 15),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Text(
-                            t.sendTab.selection.title,
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          const Spacer(),
-                          CustomIconButton(
-                            onPressed: () => ref.redux(selectedSendingFilesProvider).dispatch(ClearSelectionAction()),
-                            child: Icon(Icons.close, color: Theme.of(context).colorScheme.secondary),
-                          ),
-                          const SizedBox(width: 5),
-                        ],
-                      ),
-                      const SizedBox(height: 5),
-                      Text(t.sendTab.selection.files(files: vm.selectedFiles.length)),
-                      Text(t.sendTab.selection.size(size: vm.selectedFiles.fold(0, (prev, curr) => prev + curr.size).asReadableFileSize)),
-                      const SizedBox(height: 10),
-                      SizedBox(
-                        height: defaultThumbnailSize,
-                        child: ListView.builder(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: vm.selectedFiles.length,
-                          itemBuilder: (context, index) {
-                            final file = vm.selectedFiles[index];
-                            return Padding(
-                              padding: const EdgeInsets.only(right: 10),
-                              child: SmartFileThumbnail.fromCrossFile(file),
-                            );
-                          },
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          TextButton(
-                            style: TextButton.styleFrom(
-                              foregroundColor: Theme.of(context).colorScheme.onSurface,
-                            ),
-                            onPressed: () async {
-                              await context.push(() => const SelectedFilesPage());
-                            },
-                            child: Text(t.general.edit),
-                          ),
-                          const SizedBox(width: 15),
-                          ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Theme.of(context).colorScheme.primary,
-                              foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                            ),
-                            onPressed: () async {
-                              if (pickerOptions.length == 1) {
-                                // open directly
-                                await ref.global.dispatchAsync(
-                                  PickFileAction(
-                                    option: pickerOptions.first,
-                                    context: context,
-                                  ),
-                                );
-                                return;
-                              }
-                              await AddFileDialog.open(
-                                context: context,
-                                options: pickerOptions,
-                              );
-                            },
-                            icon: const Icon(Icons.add),
-                            label: Text(t.general.add),
-                          ),
-                          const SizedBox(width: 15),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+            _buildIdentityHeader(context, currentAlias, colorScheme),
+            const SizedBox(height: 16),
+            _buildUploadCard(context, colorScheme, selectedFiles),
+            if (selectedFiles.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              _buildSelectedFilesSection(context, colorScheme, selectedFiles),
             ],
-            Row(
-              children: [
-                const SizedBox(width: _horizontalPadding),
-                Flexible(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    child: Text(t.sendTab.nearbyDevices, style: Theme.of(context).textTheme.titleMedium),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                _ScanButton(
-                  ips: vm.localIps,
-                ),
-                Tooltip(
-                  message: t.sendTab.manualSending,
-                  child: CustomIconButton(
-                    onPressed: () async => vm.onTapAddress(context),
-                    child: const Icon(Icons.ads_click),
-                  ),
-                ),
-                Tooltip(
-                  message: t.dialogs.favoriteDialog.title,
-                  child: CustomIconButton(
-                    onPressed: () async => await vm.onTapFavorite(context),
-                    child: const Icon(Icons.favorite),
-                  ),
-                ),
-                _SendModeButton(
-                  onSelect: (mode) async => vm.onTapSendMode(context, mode),
-                ),
-              ],
-            ),
-            if (vm.favoriteDevices.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: _horizontalPadding, vertical: 6),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Brothers (Direct Connect)', style: Theme.of(context).textTheme.titleSmall),
-                    const SizedBox(height: 6),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: vm.favoriteDevices.map((b) {
-                        return ActionChip(
-                          avatar: const Icon(Icons.person, size: 18),
-                          label: Text(b.alias),
-                          onPressed: () async => await vm.onTapFavorite(context),
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: 10),
-                  ],
-                ),
-              ),
-            if (vm.nearbyDevices.isEmpty)
-              const Padding(
-                padding: EdgeInsets.only(bottom: 10, left: _horizontalPadding, right: _horizontalPadding),
-                child: Opacity(
-                  opacity: 0.3,
-                  child: DevicePlaceholderListTile(),
-                ),
-              ),
-            ...vm.nearbyDevices.map((device) {
-              final favoriteEntry = vm.favoriteDevices.findDevice(device);
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 10, left: _horizontalPadding, right: _horizontalPadding),
-                child: Hero(
-                  tag: 'device-${device.ip}',
-                  child: vm.sendMode == SendMode.multiple
-                      ? _MultiSendDeviceListTile(
-                          device: device,
-                          isFavorite: favoriteEntry != null,
-                          nameOverride: favoriteEntry?.alias,
-                          vm: vm,
-                        )
-                      : DeviceListTile(
-                          device: device,
-                          isFavorite: favoriteEntry != null,
-                          nameOverride: favoriteEntry?.alias,
-                          onDetailsTap: () async => await context.push(() => DeviceDetailsPage(device: device)),
-                          onTap: () async => await vm.onTapDevice(context, device),
-                        ),
-                ),
-              );
-            }),
-            const SizedBox(height: 10),
-            Center(
-              child: TextButton(
-                onPressed: () async {
-                  await context.push(() => const TroubleshootPage());
-                },
-                child: Text(t.troubleshootPage.title),
-              ),
-            ),
+            const SizedBox(height: 24),
+            _buildBrothersSelectionSection(context, colorScheme, peerBrothers, nearbyDevices),
             const SizedBox(height: 20),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: _horizontalPadding),
-              child: Consumer(
-                builder: (context, ref) {
-                  final animations = ref.watch(animationProvider);
-                  return OpacitySlideshow(
-                    durationMillis: 6000,
-                    running: animations,
-                    children: [
-                      Text(
-                        t.sendTab.help,
-                        style: const TextStyle(color: Colors.grey),
-                        textAlign: TextAlign.center,
-                      ),
-                      if (checkPlatformCanReceiveShareIntent())
-                        Text(
-                          t.sendTab.shareIntentInfo,
-                          style: const TextStyle(color: Colors.grey),
-                          textAlign: TextAlign.center,
-                        ),
-                    ],
-                  );
-                },
-              ),
-            ),
-            const SizedBox(height: 50),
+            _buildSendActionButton(context, colorScheme, selectedFiles, peerBrothers, nearbyDevices),
+            if (activeSessions.isNotEmpty) ...[
+              const SizedBox(height: 24),
+              _buildActiveSessionsSection(context, colorScheme, activeSessions),
+            ],
+            const SizedBox(height: 30),
           ],
         );
       },
     );
   }
-}
 
-/// A button that opens a popup menu to select [T].
-/// This is used for the scan button and the send mode button.
-class _CircularPopupButton<T> extends StatelessWidget {
-  final String tooltip;
-  final PopupMenuItemBuilder<T> itemBuilder;
-  final PopupMenuItemSelected<T>? onSelected;
-  final Widget child;
-
-  const _CircularPopupButton({
-    required this.tooltip,
-    required this.onSelected,
-    required this.itemBuilder,
-    required this.child,
-    super.key,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(9999),
-      child: Material(
-        type: MaterialType.transparency,
-        child: DividerTheme(
-          data: DividerThemeData(
-            color: Theme.of(context).brightness == Brightness.light ? Colors.teal.shade100 : Colors.grey.shade700,
-          ),
-          child: PopupMenuButton(
-            offset: const Offset(0, 40),
-            onSelected: onSelected,
-            tooltip: tooltip,
-            itemBuilder: itemBuilder,
-            child: child,
-          ),
-        ),
+  Widget _buildIdentityHeader(BuildContext context, String currentAlias, ColorScheme colorScheme) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colorScheme.outline.withValues(alpha: 0.15)),
       ),
-    );
-  }
-}
-
-/// The scan button that uses [_CircularPopupButton].
-class _ScanButton extends StatelessWidget {
-  final List<String> ips;
-
-  const _ScanButton({
-    required this.ips,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final (scanningFavorites, scanningIps) = context.ref.watch(nearbyDevicesProvider.select((s) => (s.runningFavoriteScan, s.runningIps)));
-    final animations = context.ref.watch(animationProvider);
-
-    final spinning = (scanningFavorites || scanningIps.isNotEmpty) && animations;
-    final iconColor = !animations && scanningIps.isNotEmpty ? Theme.of(context).colorScheme.warning : null;
-
-    if (ips.length <= StartSmartScan.maxInterfaces) {
-      return Tooltip(
-        message: t.sendTab.scan,
-        child: RotatingWidget(
-          duration: const Duration(seconds: 2),
-          spinning: spinning,
-          reverse: true,
-          child: CustomIconButton(
-            onPressed: () async {
-              context.redux(nearbyDevicesProvider).dispatch(ClearFoundDevicesAction());
-              await context.global.dispatchAsync(StartSmartScan());
-            },
-            child: Icon(Icons.sync, color: iconColor),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 18,
+            backgroundColor: colorScheme.primary.withValues(alpha: 0.15),
+            child: Icon(Icons.person_rounded, size: 20, color: colorScheme.primary),
           ),
-        ),
-      );
-    }
-
-    return _CircularPopupButton(
-      tooltip: t.sendTab.scan,
-      onSelected: (ip) async {
-        context.redux(nearbyDevicesProvider).dispatch(ClearFoundDevicesAction());
-        await context.global.dispatchAsync(StartLegacySubnetScan(subnets: [ip]));
-      },
-      itemBuilder: (_) {
-        return [
-          ...ips.map(
-            (ip) => PopupMenuItem(
-              value: ip,
-              padding: const EdgeInsets.only(left: 12, right: 8),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _RotatingSyncIcon(ip),
-                  const SizedBox(width: 10),
-                  Text(ip),
-                ],
-              ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Connected as',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, letterSpacing: 0.3),
+                ),
+                Text(
+                  currentAlias.isNotEmpty ? currentAlias : 'Brother',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ],
             ),
           ),
-        ];
-      },
-      child: RotatingWidget(
-        duration: const Duration(seconds: 2),
-        spinning: spinning,
-        reverse: true,
-        child: Padding(
-          padding: const EdgeInsets.all(8),
-          child: Icon(Icons.sync, color: iconColor),
+          IconButton(
+            tooltip: 'Change Identity / Device',
+            icon: const Icon(Icons.edit_outlined, size: 20),
+            onPressed: () async {
+              await showDialog(
+                context: context,
+                builder: (_) => const BrotherIdentityDialog(isInitialSetup: false),
+              );
+              _initDefaultSelection();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildUploadCard(BuildContext context, ColorScheme colorScheme, List<CrossFile> selectedFiles) {
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(color: colorScheme.outline.withValues(alpha: 0.2)),
+      ),
+      child: DropTarget(
+        onDragEntered: (_) => setState(() => _isDragging = true),
+        onDragExited: (_) => setState(() => _isDragging = false),
+        onDragDone: (event) async {
+          setState(() => _isDragging = false);
+          final droppedDirectories = event.files.where((file) => Directory(file.path).existsSync()).toList();
+          final droppedFiles = event.files.where((file) => !Directory(file.path).existsSync()).toList();
+
+          for (final dir in droppedDirectories) {
+            await context.ref.redux(selectedSendingFilesProvider).dispatchAsync(AddDirectoryAction(dir.path));
+          }
+
+          if (droppedFiles.isNotEmpty) {
+            await context.ref.redux(selectedSendingFilesProvider).dispatchAsync(
+                  AddFilesAction(files: droppedFiles, converter: CrossFileConverters.convertXFile),
+                );
+          }
+        },
+        child: CustomPaint(
+          painter: _DashedBorderPainter(
+            color: _isDragging ? colorScheme.primary : colorScheme.outline.withValues(alpha: 0.4),
+            borderRadius: 20,
+            strokeWidth: _isDragging ? 2.5 : 1.5,
+          ),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 36),
+            decoration: BoxDecoration(
+              color: _isDragging
+                  ? colorScheme.primary.withValues(alpha: 0.08)
+                  : colorScheme.surfaceContainerHighest.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: colorScheme.primary.withValues(alpha: 0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(Icons.cloud_upload_outlined, size: 48, color: colorScheme.primary),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Choose a file or drag & drop it here',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Images, documents, folders, videos, or live text',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 13, color: colorScheme.onSurface.withValues(alpha: 0.6)),
+                ),
+                const SizedBox(height: 24),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 10,
+                  alignment: WrapAlignment.center,
+                  children: [
+                    FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: () async {
+                        await context.ref.global.dispatchAsync(
+                              PickFileAction(option: FilePickerOption.file, context: context),
+                            );
+                      },
+                      icon: const Icon(Icons.file_open_rounded, size: 20),
+                      label: const Text('Browse File', style: TextStyle(fontWeight: FontWeight.w600)),
+                    ),
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: () async {
+                        await context.ref.global.dispatchAsync(
+                              PickFileAction(option: FilePickerOption.folder, context: context),
+                            );
+                      },
+                      icon: const Icon(Icons.folder_open_rounded, size: 20),
+                      label: const Text('Folder', style: TextStyle(fontWeight: FontWeight.w600)),
+                    ),
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: () async {
+                        await showDialog(
+                          context: context,
+                          builder: (_) => const LiveTextDialog(),
+                        );
+                      },
+                      icon: const Icon(Icons.edit_note_rounded, size: 20),
+                      label: const Text('Live Text', style: TextStyle(fontWeight: FontWeight.w600)),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
   }
-}
 
-/// A separate widget, so it gets the latest data from provider.
-class _RotatingSyncIcon extends StatelessWidget {
-  final String ip;
+  Widget _buildSelectedFilesSection(BuildContext context, ColorScheme colorScheme, List<CrossFile> selectedFiles) {
+    final totalBytes = selectedFiles.fold<int>(0, (prev, curr) => prev + curr.size);
 
-  const _RotatingSyncIcon(this.ip);
-
-  @override
-  Widget build(BuildContext context) {
-    final scanningIps = context.ref.watch(nearbyDevicesProvider.select((s) => s.runningIps));
-    return RotatingWidget(
-      duration: const Duration(seconds: 2),
-      spinning: scanningIps.contains(ip),
-      reverse: true,
-      child: const Icon(Icons.sync),
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: colorScheme.outline.withValues(alpha: 0.2)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Text(
+                  'Selected Items (${selectedFiles.length})',
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '• ${totalBytes.asReadableFileSize}',
+                  style: TextStyle(fontSize: 13, color: colorScheme.onSurface.withValues(alpha: 0.6)),
+                ),
+                const Spacer(),
+                TextButton(
+                  onPressed: () {
+                    context.ref.redux(selectedSendingFilesProvider).dispatch(ClearSelectionAction());
+                  },
+                  child: const Text('Clear All'),
+                ),
+              ],
+            ),
+            const Divider(height: 16),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 240),
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: selectedFiles.length,
+                separatorBuilder: (_, __) => const Divider(height: 1),
+                itemBuilder: (context, index) {
+                  final file = selectedFiles[index];
+                  return ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    leading: _buildFileLeading(file, colorScheme),
+                    title: Text(
+                      file.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                    ),
+                    subtitle: Text(
+                      file.size.asReadableFileSize,
+                      style: TextStyle(fontSize: 12, color: colorScheme.onSurface.withValues(alpha: 0.6)),
+                    ),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                      onPressed: () {
+                        context.ref.redux(selectedSendingFilesProvider).dispatch(RemoveSelectedFileAction(index));
+                      },
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
-}
 
-class _SendModeButton extends StatelessWidget {
-  final void Function(SendMode mode) onSelect;
+  Widget _buildFileLeading(CrossFile file, ColorScheme colorScheme) {
+    if (file.fileType == FileType.text) {
+      return Container(
+        width: 38,
+        height: 38,
+        decoration: BoxDecoration(
+          color: colorScheme.primary.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(Icons.subject_rounded, color: colorScheme.primary, size: 22),
+      );
+    }
+    return SizedBox(
+      width: 38,
+      height: 38,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: SmartFileThumbnail.fromCrossFile(file),
+      ),
+    );
+  }
 
-  const _SendModeButton({required this.onSelect});
-
-  @override
-  Widget build(BuildContext context) {
-    return _CircularPopupButton<int>(
-      tooltip: t.sendTab.sendMode,
-      onSelected: (mode) async {
-        switch (mode) {
-          case 0:
-            onSelect(SendMode.single);
-            break;
-          case 1:
-            onSelect(SendMode.multiple);
-            break;
-          case 2:
-            onSelect(SendMode.link);
-            break;
-          case -1:
-            await showDialog(context: context, builder: (_) => const SendModeHelpDialog());
-            break;
-        }
-      },
-      itemBuilder: (_) => [
-        PopupMenuItem(
-          value: 0,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Consumer(
-                builder: (context, ref) {
-                  final sendMode = ref.watch(settingsProvider.select((s) => s.sendMode));
-                  return Visibility(
-                    visible: sendMode == SendMode.single,
-                    maintainSize: true,
-                    maintainAnimation: true,
-                    maintainState: true,
-                    child: const Icon(Icons.check_circle),
-                  );
+  Widget _buildBrothersSelectionSection(
+    BuildContext context,
+    ColorScheme colorScheme,
+    List<String> peerBrothers,
+    Iterable<Device> nearbyDevices,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Text(
+              'Select Brothers to Send',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const Spacer(),
+            if (peerBrothers.length > 1)
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    if (_selectedBrothers.length == peerBrothers.length) {
+                      _selectedBrothers.clear();
+                    } else {
+                      _selectedBrothers.addAll(peerBrothers);
+                    }
+                  });
                 },
+                child: Text(_selectedBrothers.length == peerBrothers.length ? 'Deselect All' : 'Select Both'),
               ),
-              const SizedBox(width: 10),
-              Text(t.sendTab.sendModes.single),
-            ],
-          ),
+          ],
         ),
-        PopupMenuItem(
-          value: 1,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Consumer(
-                builder: (context, ref) {
-                  final sendMode = ref.watch(settingsProvider.select((s) => s.sendMode));
-                  return Visibility(
-                    visible: sendMode == SendMode.multiple,
-                    maintainSize: true,
-                    maintainAnimation: true,
-                    maintainState: true,
-                    child: const Icon(Icons.check_circle),
-                  );
-                },
+        const SizedBox(height: 10),
+        Row(
+          children: peerBrothers.map((brotherName) {
+            final isSelected = _selectedBrothers.contains(brotherName);
+            final onlineDevice = nearbyDevices.firstWhereOrNull(
+              (d) => d.alias.toLowerCase().contains(brotherName.toLowerCase()),
+            );
+            final isOnline = onlineDevice != null;
+
+            return Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: () {
+                    setState(() {
+                      if (isSelected) {
+                        _selectedBrothers.remove(brotherName);
+                      } else {
+                        _selectedBrothers.add(brotherName);
+                      }
+                    });
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? colorScheme.primary.withValues(alpha: 0.12)
+                          : colorScheme.surfaceContainerHighest.withValues(alpha: 0.25),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: isSelected ? colorScheme.primary : colorScheme.outline.withValues(alpha: 0.2),
+                        width: isSelected ? 2 : 1,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            CircleAvatar(
+                              radius: 16,
+                              backgroundColor: isSelected
+                                  ? colorScheme.primary
+                                  : colorScheme.surfaceContainerHighest,
+                              child: Text(
+                                brotherName.split(' ').map((s) => s.isNotEmpty ? s[0] : '').take(2).join(),
+                                style: TextStyle(
+                                  color: isSelected ? colorScheme.onPrimary : colorScheme.onSurface,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                            const Spacer(),
+                            Icon(
+                              isSelected ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
+                              color: isSelected ? colorScheme.primary : colorScheme.outline.withValues(alpha: 0.4),
+                              size: 22,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          brotherName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Container(
+                              width: 8,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: isOnline ? Colors.green : Colors.grey.withValues(alpha: 0.5),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                isOnline ? 'Online (${onlineDevice.deviceModel ?? 'Wi-Fi'})' : 'Standby',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: isOnline ? Colors.green : colorScheme.onSurface.withValues(alpha: 0.5),
+                                  fontWeight: isOnline ? FontWeight.w600 : FontWeight.normal,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
-              const SizedBox(width: 10),
-              Text(t.sendTab.sendModes.multiple),
-            ],
-          ),
-        ),
-        PopupMenuItem(
-          value: 2,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Visibility(
-                visible: false,
-                maintainSize: true,
-                maintainAnimation: true,
-                maintainState: true,
-                child: Icon(Icons.check_circle),
-              ),
-              const SizedBox(width: 10),
-              Text(t.sendTab.sendModes.link),
-            ],
-          ),
-        ),
-        const PopupMenuDivider(),
-        PopupMenuItem(
-          value: -1,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Directionality(
-                textDirection: TextDirection.ltr,
-                child: Icon(Icons.help),
-              ),
-              const SizedBox(width: 10),
-              Text(t.sendTab.sendModeHelp),
-            ],
-          ),
+            );
+          }).toList(),
         ),
       ],
-      child: const Padding(
-        padding: EdgeInsets.all(8),
-        child: Icon(Icons.settings),
+    );
+  }
+
+  Widget _buildSendActionButton(
+    BuildContext context,
+    ColorScheme colorScheme,
+    List<CrossFile> selectedFiles,
+    List<String> peerBrothers,
+    Iterable<Device> nearbyDevices,
+  ) {
+    final hasSelection = _selectedBrothers.isNotEmpty;
+    final hasFiles = selectedFiles.isNotEmpty;
+
+    return FilledButton.icon(
+      style: FilledButton.styleFrom(
+        minimumSize: const Size.fromHeight(54),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        backgroundColor: colorScheme.primary,
+        foregroundColor: colorScheme.onPrimary,
+      ),
+      onPressed: _isSending
+          ? null
+          : () async {
+              if (!hasFiles) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Please choose a file, folder, or enter live text first.'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+                return;
+              }
+
+              if (!hasSelection) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Please select at least one brother destination.'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+                return;
+              }
+
+              await _dispatchTransfers(context, selectedFiles);
+            },
+      icon: _isSending
+          ? const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+            )
+          : const Icon(Icons.send_rounded, size: 22),
+      label: Text(
+        _selectedBrothers.isEmpty
+            ? 'Select Destination'
+            : (_selectedBrothers.length == 1
+                ? 'Send to ${_selectedBrothers.first}'
+                : 'Send to Both Brothers (${_selectedBrothers.length})'),
+        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+
+  Future<void> _dispatchTransfers(BuildContext context, List<CrossFile> files) async {
+    setState(() => _isSending = true);
+    final ref = context.ref;
+    final defaultFavorites = BrotherConfig.defaultFavoriteBrothers;
+
+    final targetDevices = <Device>[];
+    final unreachableBrothers = <String>[];
+
+    for (final brotherName in _selectedBrothers) {
+      final favorite = defaultFavorites.firstWhereOrNull(
+        (f) => f.alias.toLowerCase() == brotherName.toLowerCase(),
+      );
+
+      if (favorite == null) continue;
+
+      final device = await resolveBrotherDevice(ref, favorite);
+      if (device != null) {
+        targetDevices.add(device);
+      } else {
+        unreachableBrothers.add(brotherName);
+      }
+    }
+
+    setState(() => _isSending = false);
+
+    if (unreachableBrothers.isNotEmpty && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${unreachableBrothers.join(", ")} appears offline or unreachable.'),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+
+    if (targetDevices.isEmpty) return;
+
+    if (targetDevices.length == 1) {
+      // Single target: open standard SendPage/ProgressPage directly
+      await ref.notifier(sendProvider).startSession(
+            target: targetDevices.first,
+            files: files,
+            background: false,
+          );
+    } else {
+      // Multiple targets: initiate concurrent parallel transfers
+      for (final device in targetDevices) {
+        await ref.notifier(sendProvider).startSession(
+              target: device,
+              files: files,
+              background: true,
+            );
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Sending to ${targetDevices.map((d) => d.alias).join(" and ")} simultaneously!'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
+  Widget _buildActiveSessionsSection(
+    BuildContext context,
+    ColorScheme colorScheme,
+    Map<String, SendSessionState> activeSessions,
+  ) {
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: colorScheme.outline.withValues(alpha: 0.2)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Active Transfers',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+            ),
+            const Divider(height: 16),
+            ...activeSessions.values.map((session) {
+              final isWaiting = session.status == SessionStatus.waiting;
+              final isFinished = session.status == SessionStatus.finished;
+              final isSending = session.status == SessionStatus.sending;
+
+              return ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: CircleAvatar(
+                  backgroundColor: isFinished
+                      ? Colors.green.withValues(alpha: 0.15)
+                      : colorScheme.primary.withValues(alpha: 0.15),
+                  child: Icon(
+                    isFinished ? Icons.check_rounded : (isWaiting ? Icons.hourglass_top_rounded : Icons.upload_rounded),
+                    color: isFinished ? Colors.green : colorScheme.primary,
+                  ),
+                ),
+                title: Text(session.target.alias, style: const TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: Text(
+                  isFinished
+                      ? 'Completed successfully'
+                      : (isWaiting ? 'Connecting / Waiting...' : 'Sending files...'),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isFinished ? Colors.green : colorScheme.onSurface.withValues(alpha: 0.6),
+                  ),
+                ),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.open_in_new_rounded, size: 20),
+                      onPressed: () async {
+                        if (session.status == SessionStatus.waiting) {
+                          await context.push(
+                            () => SendPage(showAppBar: true, closeSessionOnClose: false, sessionId: session.sessionId),
+                          );
+                        } else {
+                          await context.push(
+                            () => ProgressPage(showAppBar: true, closeSessionOnClose: false, sessionId: session.sessionId),
+                          );
+                        }
+                      },
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 20),
+                      onPressed: () {
+                        context.ref.notifier(sendProvider).cancelSession(session.sessionId);
+                      },
+                    ),
+                  ],
+                ),
+              );
+            }),
+          ],
+        ),
       ),
     );
   }
 }
 
-/// An advanced list tile which shows the progress of the file transfer.
-class _MultiSendDeviceListTile extends StatelessWidget {
-  final Device device;
-  final bool isFavorite;
-  final String? nameOverride;
-  final SendTabVm vm;
+class _DashedBorderPainter extends CustomPainter {
+  final Color color;
+  final double strokeWidth;
+  final double dashWidth;
+  final double dashGap;
+  final double borderRadius;
 
-  const _MultiSendDeviceListTile({
-    required this.device,
-    required this.isFavorite,
-    required this.nameOverride,
-    required this.vm,
+  _DashedBorderPainter({
+    required this.color,
+    this.strokeWidth = 1.5,
+    this.dashWidth = 6.0,
+    this.dashGap = 4.0,
+    this.borderRadius = 20.0,
   });
 
   @override
-  Widget build(BuildContext context) {
-    final ref = context.ref;
-    final session = ref.watch(sendProvider).values.firstWhereOrNull((s) => s.target.ip == device.ip);
-    final String? info;
-    final double? progress;
-    if (session != null) {
-      final files = session.files.values.where((f) => f.token != null);
-      final transferNotifier = ref.watch(fileTransferProvider);
-      final currBytes = files.fold<int>(
-        0,
-        (prev, curr) => prev + ((transferNotifier.getProgress(sessionId: session.sessionId, fileId: curr.file.id) * curr.file.size).round()),
-      );
-      final totalBytes = files.fold<int>(0, (prev, curr) => prev + curr.file.size);
-      progress = totalBytes == 0 ? 0 : currBytes / totalBytes;
-      info = session.hashedFileCount < session.files.length
-          ? t.sendPage.calculatingChecksum(curr: session.hashedFileCount, n: session.files.length)
-          : session.status.humanString;
-    } else {
-      progress = null;
-      info = null;
-    }
-    return DeviceListTile(
-      device: device,
-      info: info,
-      progress: progress,
-      isFavorite: isFavorite,
-      nameOverride: nameOverride,
-      onDetailsTap: () async => await context.push(() => DeviceDetailsPage(device: device)),
-      onTap: () async => await vm.onTapDeviceMultiSend(context, device),
-    );
-  }
-}
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = strokeWidth
+      ..style = PaintingStyle.stroke;
 
-extension on SessionStatus {
-  String? get humanString {
-    switch (this) {
-      case SessionStatus.waiting:
-        return t.sendPage.waiting;
-      case SessionStatus.recipientBusy:
-        return t.sendPage.busy;
-      case SessionStatus.declined:
-        return t.sendPage.rejected;
-      case SessionStatus.tooManyAttempts:
-        return t.sendPage.tooManyAttempts;
-      case SessionStatus.sending:
-        return null;
-      case SessionStatus.finished:
-        return t.general.finished;
-      case SessionStatus.finishedWithErrors:
-        return t.progressPage.total.title.finishedError;
-      case SessionStatus.canceledBySender:
-        return t.progressPage.total.title.canceledSender;
-      case SessionStatus.canceledByReceiver:
-        return t.progressPage.total.title.canceledReceiver;
+    final rrect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(strokeWidth / 2, strokeWidth / 2, size.width - strokeWidth, size.height - strokeWidth),
+      Radius.circular(borderRadius),
+    );
+
+    final path = Path()..addRRect(rrect);
+
+    for (final metric in path.computeMetrics()) {
+      double distance = 0;
+      while (distance < metric.length) {
+        final length = (distance + dashWidth > metric.length) ? metric.length - distance : dashWidth;
+        canvas.drawPath(metric.extractPath(distance, distance + length), paint);
+        distance += dashWidth + dashGap;
+      }
     }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DashedBorderPainter oldDelegate) {
+    return color != oldDelegate.color || strokeWidth != oldDelegate.strokeWidth;
   }
 }
