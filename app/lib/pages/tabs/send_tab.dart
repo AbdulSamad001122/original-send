@@ -5,7 +5,6 @@ import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
 import 'package:localsend_app/model/brother_config.dart';
 import 'package:localsend_app/model/cross_file.dart';
-import 'package:localsend_app/model/persistence/favorite_device.dart';
 import 'package:localsend_app/model/state/send/send_session_state.dart';
 import 'package:localsend_app/pages/progress_page.dart';
 import 'package:localsend_app/pages/send_page.dart';
@@ -17,6 +16,8 @@ import 'package:localsend_app/provider/settings_provider.dart';
 import 'package:localsend_app/util/brother_send_helper.dart';
 import 'package:localsend_app/util/native/cross_file_converters.dart';
 import 'package:localsend_app/util/native/file_picker.dart';
+import 'package:localsend_app/util/device_type_ext.dart';
+import 'package:localsend_app/widget/dialogs/brother_device_picker_dialog.dart';
 import 'package:localsend_app/widget/dialogs/brother_identity_dialog.dart';
 import 'package:localsend_app/widget/dialogs/live_text_dialog.dart';
 import 'package:localsend_app/widget/file_thumbnail.dart';
@@ -399,10 +400,11 @@ class _SendTabState extends State<SendTab> {
         Row(
           children: peerBrothers.map((brotherName) {
             final isSelected = _selectedBrothers.contains(brotherName);
-            final onlineDevice = nearbyDevices.firstWhereOrNull(
+            final matchingDevices = nearbyDevices.where(
               (d) => d.alias.toLowerCase().contains(brotherName.toLowerCase()),
-            );
-            final isOnline = onlineDevice != null;
+            ).toList();
+            final isOnline = matchingDevices.isNotEmpty;
+            final primaryDevice = matchingDevices.firstOrNull;
 
             return Expanded(
               child: Padding(
@@ -475,7 +477,11 @@ class _SendTabState extends State<SendTab> {
                             const SizedBox(width: 6),
                             Expanded(
                               child: Text(
-                                isOnline ? 'Online (${onlineDevice.deviceModel ?? 'Wi-Fi'})' : 'Standby',
+                                isOnline
+                                    ? (matchingDevices.length > 1
+                                        ? '${matchingDevices.length} Devices Online'
+                                        : 'Online (${primaryDevice?.deviceModel ?? primaryDevice?.deviceType.humanName ?? 'Wi-Fi'})')
+                                    : 'Standby',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
@@ -558,31 +564,50 @@ class _SendTabState extends State<SendTab> {
   }
 
   Future<void> _dispatchTransfers(BuildContext context, List<CrossFile> files) async {
-    setState(() => _isSending = true);
     final ref = context.ref;
     final defaultFavorites = BrotherConfig.defaultFavoriteBrothers;
+    final nearbyDevices = ref.read(nearbyDevicesProvider).allDevices.values;
 
     final targetDevices = <Device>[];
     final unreachableBrothers = <String>[];
 
     for (final brotherName in _selectedBrothers) {
-      final favorite = defaultFavorites.firstWhereOrNull(
-        (f) => f.alias.toLowerCase() == brotherName.toLowerCase(),
-      );
+      final matchingDevices = nearbyDevices.where(
+        (d) => d.alias.toLowerCase().contains(brotherName.toLowerCase()),
+      ).toList();
 
-      if (favorite == null) continue;
-
-      final device = await resolveBrotherDevice(ref, favorite);
-      if (device != null) {
-        targetDevices.add(device);
+      if (matchingDevices.length > 1) {
+        // Multiple devices online: prompt sender which device to send to
+        final chosen = await BrotherDevicePickerDialog.open(
+          context: context,
+          brotherName: brotherName,
+          devices: matchingDevices,
+        );
+        if (chosen == null || chosen.isEmpty) {
+          // Sender cancelled this brother
+          continue;
+        }
+        targetDevices.addAll(chosen);
+      } else if (matchingDevices.length == 1) {
+        targetDevices.add(matchingDevices.first);
       } else {
-        unreachableBrothers.add(brotherName);
+        // Fallback to resolveBrotherDevice via default mDNS/IP
+        final favorite = defaultFavorites.firstWhereOrNull(
+          (f) => f.alias.toLowerCase() == brotherName.toLowerCase(),
+        );
+
+        if (favorite != null) {
+          final device = await resolveBrotherDevice(ref, favorite);
+          if (device != null) {
+            targetDevices.add(device);
+          } else {
+            unreachableBrothers.add(brotherName);
+          }
+        }
       }
     }
 
-    setState(() => _isSending = false);
-
-    if (unreachableBrothers.isNotEmpty && mounted) {
+    if (unreachableBrothers.isNotEmpty && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('${unreachableBrothers.join(", ")} appears offline or unreachable.'),
@@ -593,34 +618,43 @@ class _SendTabState extends State<SendTab> {
 
     if (targetDevices.isEmpty) return;
 
-    if (targetDevices.length == 1) {
-      // Single target: open standard SendPage/ProgressPage directly
-      await ref
-          .notifier(sendProvider)
-          .startSession(
-            target: targetDevices.first,
-            files: files,
-            background: false,
-          );
-    } else {
-      // Multiple targets: initiate concurrent parallel transfers
-      for (final device in targetDevices) {
+    setState(() => _isSending = true);
+
+    try {
+      if (targetDevices.length == 1) {
+        // Single target: open standard SendPage/ProgressPage directly
         await ref
             .notifier(sendProvider)
             .startSession(
-              target: device,
+              target: targetDevices.first,
               files: files,
-              background: true,
+              background: false,
             );
-      }
+      } else {
+        // Multiple targets: initiate concurrent parallel transfers
+        for (final device in targetDevices) {
+          await ref
+              .notifier(sendProvider)
+              .startSession(
+                target: device,
+                files: files,
+                background: true,
+              );
+        }
 
+        if (context.mounted) {
+          final targetNames = targetDevices.map((d) => '${d.alias} (${d.deviceModel ?? d.deviceType.humanName})').join(', ');
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Sending to $targetNames in parallel!'),
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+      }
+    } finally {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Sending to ${targetDevices.map((d) => d.alias).join(" and ")} simultaneously!'),
-            duration: const Duration(seconds: 3),
-          ),
-        );
+        setState(() => _isSending = false);
       }
     }
   }
@@ -649,7 +683,6 @@ class _SendTabState extends State<SendTab> {
             ...activeSessions.values.map((session) {
               final isWaiting = session.status == SessionStatus.waiting;
               final isFinished = session.status == SessionStatus.finished;
-              final isSending = session.status == SessionStatus.sending;
 
               return ListTile(
                 contentPadding: EdgeInsets.zero,
