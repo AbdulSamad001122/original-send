@@ -96,3 +96,57 @@ jobs:
         with:
           name: BrotherSend-Windows-Portable
           path: BrotherSend-Windows-Portable.zip
+
+  build-macos:
+    name: Build macOS Application
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: 'stable'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+
+      - name: Install Flutter Dependencies
+        working-directory: app
+        run: flutter pub get
+
+      - name: Install Cargokit Dependencies
+        working-directory: packages/localsend_isolates/rust_builder/cargokit/build_tool
+        run: flutter pub get
+
+      - name: Build macOS
+        working-directory: app
+        run: flutter build macos --release
+
+      - name: Package macOS DMG & ZIP
+        run: |
+          # Package ZIP preserving symlinks and macOS metadata
+          ditto -c -k --sequesterRsrc --keepParent "app/build/macos/Build/Products/Release/LocalSend.app" "BrotherSend-macOS.zip"
+          
+          # Prepare staging folder for DMG with Applications symlink
+          mkdir -p dmg_staging
+          cp -R "app/build/macos/Build/Products/Release/LocalSend.app" dmg_staging/
+          ln -s /Applications dmg_staging/Applications
+          hdiutil create -volname "BrotherSend" -srcfolder dmg_staging -ov -format UDZO "BrotherSend-macOS.dmg"
+
+      - name: Upload macOS DMG Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BrotherSend-macOS-DMG
+          path: BrotherSend-macOS.dmg
+
+      - name: Upload macOS ZIP Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BrotherSend-macOS-ZIP
+          path: BrotherSend-macOS.zip
+
