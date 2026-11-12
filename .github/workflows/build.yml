@@ -150,3 +150,46 @@ jobs:
           name: BrotherSend-macOS-ZIP
           path: BrotherSend-macOS.zip
 
+  release:
+    name: Publish Public GitHub Release
+    needs: [build-android, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release_assets
+          cp artifacts/BrotherSend-Android-APK/app-release.apk release_assets/BrotherSend-Android.apk
+          cp artifacts/BrotherSend-Windows-Portable/BrotherSend-Windows-Portable.zip release_assets/BrotherSend-Windows.zip
+          cp artifacts/BrotherSend-macOS-DMG/BrotherSend-macOS.dmg release_assets/BrotherSend-macOS.dmg
+          cp artifacts/BrotherSend-macOS-ZIP/BrotherSend-macOS.zip release_assets/BrotherSend-macOS.zip
+          ls -la release_assets
+
+      - name: Create or Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v1.0.0
+          name: "BrotherSend v1.0.0"
+          draft: false
+          prerelease: false
+          make_latest: true
+          body: |
+            ## BrotherSend Binaries (Direct Download - No Login Required)
+
+            Click any direct link below to download BrotherSend directly without signing in:
+
+            * 📱 **Android**: [BrotherSend-Android.apk](https://github.com/${{ github.repository }}/releases/download/v1.0.0/BrotherSend-Android.apk)
+            * 💻 **Windows**: [BrotherSend-Windows.zip](https://github.com/${{ github.repository }}/releases/download/v1.0.0/BrotherSend-Windows.zip) (Portable)
+            * 🍏 **macOS (DMG)**: [BrotherSend-macOS.dmg](https://github.com/${{ github.repository }}/releases/download/v1.0.0/BrotherSend-macOS.dmg) (Installer)
+            * 🍏 **macOS (ZIP)**: [BrotherSend-macOS.zip](https://github.com/${{ github.repository }}/releases/download/v1.0.0/BrotherSend-macOS.zip) (Archive)
+          files: release_assets/*
+
+

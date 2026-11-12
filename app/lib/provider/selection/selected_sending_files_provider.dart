@@ -15,10 +15,8 @@ import 'package:logging/logging.dart';
 import 'package:path/path.dart' as p;
 import 'package:refena_flutter/refena_flutter.dart';
 import 'package:share_handler/share_handler.dart';
-import 'package:uuid/uuid.dart';
 
 final _logger = Logger('SelectedSendingFiles');
-const _uuid = Uuid();
 
 /// Manages files selected for sending.
 /// Will stay alive even after a session has been completed to send the same files to another device.

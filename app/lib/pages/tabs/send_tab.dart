@@ -14,9 +14,9 @@ import 'package:localsend_app/provider/network/send_provider.dart';
 import 'package:localsend_app/provider/selection/selected_sending_files_provider.dart';
 import 'package:localsend_app/provider/settings_provider.dart';
 import 'package:localsend_app/util/brother_send_helper.dart';
+import 'package:localsend_app/util/device_type_ext.dart';
 import 'package:localsend_app/util/native/cross_file_converters.dart';
 import 'package:localsend_app/util/native/file_picker.dart';
-import 'package:localsend_app/util/device_type_ext.dart';
 import 'package:localsend_app/widget/dialogs/brother_device_picker_dialog.dart';
 import 'package:localsend_app/widget/dialogs/brother_identity_dialog.dart';
 import 'package:localsend_app/widget/dialogs/live_text_dialog.dart';
@@ -164,15 +164,16 @@ class _SendTabState extends State<SendTab> {
         onDragExited: (_) => setState(() => _isDragging = false),
         onDragDone: (event) async {
           setState(() => _isDragging = false);
+          final ref = context.ref;
           final droppedDirectories = event.files.where((file) => Directory(file.path).existsSync()).toList();
           final droppedFiles = event.files.where((file) => !Directory(file.path).existsSync()).toList();
 
           for (final dir in droppedDirectories) {
-            await context.ref.redux(selectedSendingFilesProvider).dispatchAsync(AddDirectoryAction(dir.path));
+            await ref.redux(selectedSendingFilesProvider).dispatchAsync(AddDirectoryAction(dir.path));
           }
 
           if (droppedFiles.isNotEmpty) {
-            await context.ref
+            await ref
                 .redux(selectedSendingFilesProvider)
                 .dispatchAsync(
                   AddFilesAction(files: droppedFiles, converter: CrossFileConverters.convertXFile),
@@ -311,7 +312,7 @@ class _SendTabState extends State<SendTab> {
               child: ListView.separated(
                 shrinkWrap: true,
                 itemCount: selectedFiles.length,
-                separatorBuilder: (_, __) => const Divider(height: 1),
+                separatorBuilder: (_, _) => const Divider(height: 1),
                 itemBuilder: (context, index) {
                   final file = selectedFiles[index];
                   return ListTile(
@@ -400,9 +401,11 @@ class _SendTabState extends State<SendTab> {
         Row(
           children: peerBrothers.map((brotherName) {
             final isSelected = _selectedBrothers.contains(brotherName);
-            final matchingDevices = nearbyDevices.where(
-              (d) => d.alias.toLowerCase().contains(brotherName.toLowerCase()),
-            ).toList();
+            final matchingDevices = nearbyDevices
+                .where(
+                  (d) => d.alias.toLowerCase().contains(brotherName.toLowerCase()),
+                )
+                .toList();
             final isOnline = matchingDevices.isNotEmpty;
             final primaryDevice = matchingDevices.firstOrNull;
 
@@ -479,8 +482,8 @@ class _SendTabState extends State<SendTab> {
                               child: Text(
                                 isOnline
                                     ? (matchingDevices.length > 1
-                                        ? '${matchingDevices.length} Devices Online'
-                                        : 'Online (${primaryDevice?.deviceModel ?? primaryDevice?.deviceType.humanName ?? 'Wi-Fi'})')
+                                          ? '${matchingDevices.length} Devices Online'
+                                          : 'Online (${primaryDevice?.deviceModel ?? primaryDevice?.deviceType.humanName ?? 'Wi-Fi'})')
                                     : 'Standby',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
@@ -572,9 +575,11 @@ class _SendTabState extends State<SendTab> {
     final unreachableBrothers = <String>[];
 
     for (final brotherName in _selectedBrothers) {
-      final matchingDevices = nearbyDevices.where(
-        (d) => d.alias.toLowerCase().contains(brotherName.toLowerCase()),
-      ).toList();
+      final matchingDevices = nearbyDevices
+          .where(
+            (d) => d.alias.toLowerCase().contains(brotherName.toLowerCase()),
+          )
+          .toList();
 
       if (matchingDevices.length > 1) {
         // Multiple devices online: prompt sender which device to send to
@@ -738,15 +743,13 @@ class _SendTabState extends State<SendTab> {
 class _DashedBorderPainter extends CustomPainter {
   final Color color;
   final double strokeWidth;
-  final double dashWidth;
-  final double dashGap;
   final double borderRadius;
+  static const double dashWidth = 6.0;
+  static const double dashGap = 4.0;
 
   _DashedBorderPainter({
     required this.color,
     this.strokeWidth = 1.5,
-    this.dashWidth = 6.0,
-    this.dashGap = 4.0,
     this.borderRadius = 20.0,
   });
 

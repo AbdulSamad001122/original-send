@@ -12,7 +12,8 @@ Future<bool> enableContextMenu() async {
 
   try {
     final exe = Platform.resolvedExecutable.replaceAll('/', '\\');
-    final String script = '''
+    final String script =
+        '''
 \$TargetPath = "$exe"
 \$ShortcutFile = "${_getWindowsFilePath(_windowsFileName)}"
 
